@@ -1,0 +1,109 @@
+#!/usr/bin/python3
+from __future__ import print_function
+import sys
+import re
+import requests
+import orionsdk
+import socket
+from orionsdk import SwisClient
+
+# Note several custom properties, please change to suite orion customization needs.
+
+# Ignore old certificate format warning
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+
+# Get IP from argv1
+dns_name = str(sys.argv[1])
+ip_address = socket.gethostbyname(dns_name)
+
+# Get env from argv2
+env_name = str(sys.argv[2])
+
+# environment dictionary
+environments = {
+ "dev": "Development",
+ "test": "Test",
+ "uat": "UAT",
+ "production": "Production"
+}
+
+# translate
+workspace = environments[env_name]
+print (workspace)
+
+def main():
+    # Auth
+    swis = orionsdk.SwisClient("SolarWinds-Orion", "SOMEUSERNAME", "SOMEPASSWORD", verify="/etc/pki/tls/certs/SolarWinds-Orion.pem")
+
+    # fill these in for the node you want to add!
+    community = 'SOMECOMMUNITY'
+
+    # set up properties for the new node
+    node_properties = {
+        'IPAddress': ip_address,
+        'EngineID': 3,
+        'ObjectSubType': 'SNMP',
+        'SNMPVersion': 2,
+        'Community': community,
+        'DNS': dns_name,
+        'SysName': dns_name,
+	'NodeName': dns_name,
+    }
+
+    print("Adding node {} ".format(node_properties['IPAddress']))
+    results = swis.create('Orion.Nodes', **node_properties)
+
+    # extract the nodeID from the result
+    nodeid = re.search(r'(\d+)$', results).group(0)
+    
+    pollers_enabled = {
+        'N.Status.ICMP.Native': True,
+        'N.Status.SNMP.Native': False,
+        'N.ResponseTime.ICMP.Native': True,
+        'N.ResponseTime.SNMP.Native': False,
+        'N.Details.SNMP.Generic': True,
+        'N.Uptime.SNMP.Generic': True,
+        'N.Cpu.SNMP.HrProcessorLoad': True,
+        'N.Memory.SNMP.NetSnmpReal': True,
+        'N.AssetInventory.Snmp.Generic': True,
+        'N.Memory.SNMP.HrStorage': True,
+        'N.Topology_Layer3.SNMP.ipNetToMedia': False,
+        'N.Routing.SNMP.Ipv4CidrRoutingTable': False
+    }
+
+    pollers = []
+    for k in pollers_enabled:
+        pollers.append(
+            {
+                'PollerType': k,
+                'NetObject': 'N:' + nodeid,
+                'NetObjectType': 'N',
+                'NetObjectID': nodeid,
+                'Enabled': pollers_enabled[k]
+            }
+        )
+
+    for poller in pollers:
+        print("Poller: {} State: {}".format(poller['PollerType'], poller['Enabled']))
+        response = swis.create('Orion.Pollers', **poller)
+
+    # set custom properties
+    custom_properties = {
+        'Department': 'Server',
+	'Model': 'Server',
+	'Workspace': workspace
+    }
+
+    for k,v in custom_properties.items():
+        print("Setting {}: {}".format(k, v), end="")
+        swis.update(results + '/CustomProperties', **{k: v})
+
+    print("\n")
+    print("Node has been added. Discovery generally occurs every 30 minutes.")
+    print("\n")
+    print("Browse to the orion node and select 'List Resources'. Check all resources that should be monitored.")
+
+if __name__ == '__main__':
+    main()
+

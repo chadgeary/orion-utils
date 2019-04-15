@@ -1,0 +1,52 @@
+#!/usr/bin/python3
+from __future__ import print_function
+import sys
+import re
+import requests
+import orionsdk
+import socket
+from orionsdk import SwisClient
+from datetime import datetime, timedelta
+
+# Ignore old certificate format warning
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+
+# must supply node name and hours to mute
+if len(sys.argv) < 2:
+    print("{}: missing argument: orion-lookup [hostname1,hostname2,...]".format(sys.argv[0]))
+    exit(1)
+
+def main():
+    # Auth
+    swis = orionsdk.SwisClient("SolarWinds-Orion", "SOMEUSERNAME", "SOMEPASSWORD", verify="/etc/pki/tls/certs/SolarWinds-Orion.pem")
+
+    # Header
+    print("nodeId,caption,ip,dns,machineType")
+
+    # loop through argv1
+    nodelist = sys.argv[1].split(",")
+    for somenode in nodelist:
+
+        # Translate user argument 1 from name to ip (helps prevent duplicates / ambiguity)
+        dns_name = str(somenode)
+        ip_address = socket.gethostbyname(dns_name)
+
+        # Query SolarWinds by IP for node, returns nodeid, name (caption), and uri.
+        results = swis.query('SELECT NodeID, Caption, DNS, MachineType FROM Orion.Nodes WHERE IPAddress = @ip_addr', ip_addr=ip_address)
+        if results['results']:
+            nodeId = results['results'][0]['NodeID']
+            caption = results['results'][0]['Caption']
+            dns = results['results'][0]['DNS']
+            machineType = results["results"][0]["MachineType"]
+
+            #suppressresult = sis.invoke("Orion.Nodes", "Unmanage", netObjectId, now, until, False)
+            print("{},{},{},{},{}".format(nodeId, caption, ip_address, dns, machineType))
+        else:
+            print("{},not found,,{},".format(somenode, ip_address))
+
+    print("complete, exiting.")
+    requests.packages.urllib3.disable_warnings()
+
+if __name__ == '__main__':
+    main()

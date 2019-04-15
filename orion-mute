@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+from __future__ import print_function
+import sys
+import re
+import requests
+import orionsdk
+import socket
+from orionsdk import SwisClient
+from datetime import datetime, timedelta
+
+# Ignore old certificate format warning
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.SecurityWarning)
+
+# must supply node name and hours to mute
+if len(sys.argv) < 3:
+    print("{}: missing argument: orion-mute [hostname] [hours]".format(sys.argv[0]))
+    print("{}: set hours to 0 to unmute a node".format(sys.argv[0]))
+    exit(1)
+else:
+    print("Mute {} for {} hour(s). To unmute immediately, run: orion-mute {} 0".format(sys.argv[1], sys.argv[2], sys.argv[1]))
+
+def main():
+    # Auth
+    swis = orionsdk.SwisClient("SolarWinds-Orion", "SOMEUSERNAME", "SOMEPASSWORD", verify="/etc/pki/tls/certs/SolarWinds-Orion.pem")
+
+    # Translate user argument 1 from name to ip (helps prevent duplicates / ambiguity)
+    dns_name = str(sys.argv[1])
+    ip_address = socket.gethostbyname(dns_name)
+
+    # Query SolarWinds by IP for node, returns nodeid, name (caption), and uri.
+    results = swis.query('SELECT NodeID, Caption, Uri FROM Orion.Nodes WHERE IPAddress = @ip_addr', ip_addr=ip_address)
+    if results['results']:
+        nodeId = results['results'][0]['NodeID']
+        caption = results['results'][0]['Caption']
+        nodeUri = results['results'][0]['Uri']
+        interfaceId = results["results"][0]["NodeID"]
+        netObjectId = "N:{}".format(interfaceId)
+        mutestart = datetime.utcnow() + timedelta(hours=int(.001))
+        mutestartlocal = datetime.now() + timedelta(hours=int(.001))
+        muteuntil = mutestart + timedelta(hours=int(sys.argv[2]))
+        muteuntillocal = mutestartlocal + timedelta(hours=int(sys.argv[2]))
+        print("mute start: {}\nmute until: {}".format(mutestartlocal, muteuntillocal))
+
+        # supress list is a list (important) of nodes Uris to mute, this script only supplies one at the moment.
+        suppresslist = [nodeUri]
+
+        # 'Z' must be appended to start time (UTC)
+        swis.invoke("Orion.AlertSuppression", "SuppressAlerts", suppresslist, str(mutestart) + 'Z', muteuntil)
+
+        #suppressresult = sis.invoke("Orion.Nodes", "Unmanage", netObjectId, now, until, False)
+        print("complete, exiting.")
+    else:
+        print("{} not found".format(sys.argv[1]))
+
+    requests.packages.urllib3.disable_warnings()
+
+if __name__ == '__main__':
+    main()
